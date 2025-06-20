@@ -21,7 +21,7 @@ def cargar_excel():
     archivo = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx *.xls")])
     if not archivo:
         return
-
+    
     try:
         progress['value'] = 10
         ventana.update()
