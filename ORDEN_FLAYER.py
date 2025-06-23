@@ -2,6 +2,8 @@ import pandas as pd
 import tkinter as tk
 import matplotlib.pyplot as plt
 import time
+
+from fontTools.cffLib import encodeNumber
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from tkinter import filedialog, ttk, messagebox
 
@@ -21,7 +23,7 @@ def cargar_excel():
     archivo = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx *.xls")])
     if not archivo:
         return
-    
+
     try:
         progress['value'] = 10
         ventana.update()
@@ -30,10 +32,13 @@ def cargar_excel():
         progress['value'] = 30
         ventana.update()
 
+        print("Filas reales del detalle:", len(detalle_df)) # Debug
+
         relacion_df = pd.read_excel(archivo, sheet_name="RELACIÓN FAC-PED", engine="openpyxl", header=None)
         relacion_df.columns = relacion_df.iloc[0]
         relacion_df = relacion_df[1:]
         relacion_df = relacion_df[["NumeroFactura", "NumeroPedimento"]]
+        relacion_df = relacion_df.drop_duplicates(subset=["NumeroFactura"])
         progress['value'] = 50
         ventana.update()
 
@@ -41,24 +46,26 @@ def cargar_excel():
         encabezado_df.columns = ["NumeroFactura", "?", "TipoOperacion"] + list(encabezado_df.columns[3:])
         encabezado_df = encabezado_df[1:]
         encabezado_df = encabezado_df[["NumeroFactura", "TipoOperacion"]]
+        encabezado_df = encabezado_df.drop_duplicates(subset=["NumeroFactura"])
         progress['value'] = 70
         ventana.update()
 
+        # Unificar tipos
         detalle_df["Número Factura"] = detalle_df["Número Factura"].astype(str)
         relacion_df["NumeroFactura"] = relacion_df["NumeroFactura"].astype(str)
         encabezado_df["NumeroFactura"] = encabezado_df["NumeroFactura"].astype(str)
 
+        # Realizar los merge sin multiplicación de filas
         merged_df = detalle_df.merge(relacion_df, left_on="Número Factura", right_on="NumeroFactura", how="left")
         merged_df = merged_df.merge(encabezado_df, left_on="Número Factura", right_on="NumeroFactura", how="left")
-
         merged_df["TipoOperacion"] = merged_df["TipoOperacion"].map({
             1: "Importación",
             2: "Exportación"
         })
 
         df = merged_df[["Número Material", "Número Factura", "Cantidad UMC", "NumeroPedimento", "TipoOperacion"]]
-        df = df.dropna(subset=["Número Material"])
-        df = df.drop_duplicates(subset=["Número Material"])
+        # df = df.dropna(subset=["Número Material"])
+        # df = df.drop_duplicates(subset=["Número Material"])
 
         df_original = df
         aplicar_filtro()
@@ -93,13 +100,15 @@ def mostrar_datos(df):
         tabla.delete(row)
 
     # Inserta cada fila del DataFrame en la tabla
-    for _, row in df.iterrows():
-        numero_material = str(row["Número Material"]).strip()
+    for idx, (_,row) in enumerate(df.iterrows(), start = 1):
+        numero_material = str(row["Número Material"]).strip() if pd.notna(row["Número Material"]) else ""
         estado = ""
         if materiales_siadal:
             estado = "Existente" if numero_material in materiales_siadal else "No Existe"
 
         tabla.insert("", "end", values=(
+            idx,
+            numero_material,
             row["Número Material"],
             row["Número Factura"],
             row["Cantidad UMC"],
@@ -111,8 +120,8 @@ def mostrar_datos(df):
 # Guarda los datos actualmente mostrados en la tabla a un archivo Excel
 def guardar_datos():
     # Recupera los valores actuales de la tabla
+    columnas = ["N°", "Número Material", "Número Factura", "Cantidad UMC", "NumeroPedimento", "TipoOperacion"]
     filas = [tabla.item(i)['values'] for i in tabla.get_children()]
-    columnas = ["Número Material", "Número Factura", "Cantidad UMC", "NumeroPedimento", "TipoOperacion"]
     df_guardar = pd.DataFrame(filas, columns=columnas)
 
     # Diálogo para guardar el archivo
@@ -193,12 +202,13 @@ def mostrar_comparacion_excel_siadal(materiales_excel, materiales_sql):
 
     tabla_comp = ttk.Treeview(
         frame_comparacion,
-        columns=["excel", "siadal"],
+        columns=["n", "excel", "siadal"],
         show="headings",
         yscrollcommand=scroll_y.set,
         xscrollcommand=scroll_x.set
     )
 
+    tabla_comp.heading("n", text="N°")
     tabla_comp.heading("excel", text="Número Material (Excel)")
     tabla_comp.heading("siadal", text="Número Material (SIADAL")
 
@@ -209,11 +219,23 @@ def mostrar_comparacion_excel_siadal(materiales_excel, materiales_sql):
     tabla_comp.pack(fill="both", expand=True)
 
     tabla_comp.tag_configure("sin_coincidencia", background="salmon")
+    tabla_comp.tag_configure("sql_match", background="lightgreen")
+    tabla_comp.tag_configure("avanzado_match", background="lightblue")
 
-    for mat in sorted(materiales_excel):
-        siadal_match = mat if mat in materiales_existentes_totales else ""
-        tag = "sin_coincidencia" if siadal_match == "" else ""
-        tabla_comp.insert("", "end", values=(mat, siadal_match), tags=(tag,))
+    materiales_unicos = sorted(set(materiales_excel))
+
+    for idx, mat in enumerate(materiales_unicos, start=1):
+        if mat in materiales_siadal:
+            siadal_match = mat
+            tag = "sql_match"
+        elif mat in materiales_encontrados_avanzados:
+            siadal_match = mat
+            tag = "avanzado_match"
+        else:
+            siadal_match = ""
+            tag = "sin_coincidencia"
+
+        tabla_comp.insert("", "end", values=(idx, mat, siadal_match), tags=(tag,))
 
 # --------------------------------------------
 # FIN COMPARACION
@@ -265,8 +287,10 @@ def consultar_y_colorear():
         total = len(df_original)
         procesados = 0
 
+        idx = 1
+
         for _, row in df_original.iterrows():
-            numero_material = str(row["Número Material"]).strip()
+            numero_material = str(row["Número Material"]).strip() if pd.notna(row["Número Material"]) else ""
             if numero_material in materiales_vistos:
                 continue
             materiales_vistos.add(numero_material)
@@ -275,6 +299,7 @@ def consultar_y_colorear():
             estado = "Existente" if tag_color == "verde" else "No existente"
 
             tabla.insert("", "end", values=(
+                idx,
                 numero_material,
                 row["Número Factura"],
                 row["Cantidad UMC"],
@@ -283,6 +308,7 @@ def consultar_y_colorear():
                 estado
             ), tags=(tag_color,))
 
+            idx += 1
             procesados += 1
             progreso_actual = 40 + int((procesados / total) * 60)
             progress['value'] = progreso_actual
@@ -339,10 +365,6 @@ def buscar_coincidencias_avanzadas():
 
         df_no_encontrados = df_original[~df_original["Número Material"].astype(str).isin(materiales_siadal)]
 
-        print("---- Coincidencias Avanzadas ----")
-        print(f"Total de materiales en Excel: {len(df_original)}")
-        print(f"Materiales no encontrados en SIADAL: {len(df_no_encontrados)}")
-
         if df_no_encontrados.empty:
             messagebox.showinfo("Información", "No hay materiales no encontrados en SIADAL para buscar coincidencias avanzadas.")
             progress['value'] = 0
@@ -353,7 +375,7 @@ def buscar_coincidencias_avanzadas():
         procesados = 0
 
         for _, fila in df_no_encontrados.iterrows():
-            numero_material = str(fila["Número Material"]).strip()
+            numero_material = str(fila["Número Material"]).strip()  if pd.notna(fila["Número Material"]) else ""
             numero_factura = str(fila["Número Factura"]).strip()
             cantidad_umc = int(fila["Cantidad UMC"])
 
@@ -421,12 +443,14 @@ def buscar_coincidencias_avanzadas():
 
         tabla_coincidencias = ttk.Treeview(
             frame_tabla,
-            columns=["Fecha", "Proveedor", "Pedimento", "Factura", "Folio", "Caja_CTR", "NúmeroMaterial", "Descripción", "Cantidad"],
+            columns=["n", "Fecha", "Proveedor", "Pedimento", "Factura", "Folio", "Caja_CTR", "NúmeroMaterial", "Descripción", "Cantidad"],
             show="headings",
             yscrollcommand=scroll_y.set,
             xscrollcommand=scroll_x.set,
             height=20
         )
+
+        tabla_coincidencias.heading("n", text = "N°")
 
         for col in tabla_coincidencias["columns"]:
             tabla_coincidencias.heading(col, text=col)
@@ -438,15 +462,17 @@ def buscar_coincidencias_avanzadas():
         scroll_x.pack(side="bottom", fill="x")
         tabla_coincidencias.pack(fill="both", expand=True)
 
-        for fila in resultados_totales:
-            tabla_coincidencias.insert("", "end", values=fila)
+        for idx, fila in enumerate(resultados_totales, start=1):
+            tabla_coincidencias.insert("", "end", values=[idx] + fila)
 
         # Guardar coincidencias avanzadas encontradas
         global materiales_encontrados_avanzados
         materiales_encontrados_avanzados = set()
 
         if resultados_totales:
-            materiales_encontrados_avanzados = set(f[6] for f in resultados_totales)
+            materiales_encontrados_avanzados = set(
+                f[6] for f in resultados_totales if f[6] in df_original["Número Material"].astype(str).values
+            )
 
             df_exportar = pd.DataFrame(resultados_totales, columns=[
                 "Fecha", "Proveedor", "Pedimento", "Factura", "Folio", "Caja_CTR",
@@ -469,6 +495,30 @@ def buscar_coincidencias_avanzadas():
         else:
             messagebox.showinfo("Sin Resultados",
                             "No se encontraron coincidencias avanzadas para los materiales no existentes.")
+
+        # Después de guardar resultados
+        if resultados_totales:
+            materiales_encontrados_avanzados = set(f[6] for f in resultados_totales)
+
+            # ESTA PARTE ACTUALIZA LA TABLA PRINCIPAL Y LA COMPARACIÓN
+            materiales_vistos_actualizados = materiales_vistos.union(materiales_encontrados_avanzados)
+            mostrar_comparacion_excel_siadal(materiales_vistos_actualizados, materiales_siadal)
+
+            # También inserta los nuevos encontrados en la tabla principal
+            for _, row in df_original.iterrows():
+                numero_material = str(fila["Número Material"]).strip()  if pd.notna(row["Número Material"]) else ""
+                if numero_material in materiales_encontrados_avanzados and numero_material not in materiales_vistos:
+                    tabla.insert("", "end", values=(
+                        numero_material,
+                        row["Número Factura"],
+                        row["Cantidad UMC"],
+                        row["NumeroPedimento"],
+                        row["TipoOperacion"],
+                        "Coincidencia Avanzada"
+                    ), tags=("amarillo",))
+                    materiales_vistos.add(numero_material)
+
+            tabla.tag_configure("amarillo", background="khaki")
 
     except Exception as e:
         progress['value'] = 0
@@ -513,7 +563,7 @@ scroll_x = tk.Scrollbar(frame_tabla, orient="horizontal")
 # Tabla con scroll
 tabla = ttk.Treeview(
     frame_tabla,
-    columns=["material", "factura", "umc", "pedimento", "tipo", "estado"],
+    columns=["n", "material", "factura", "umc", "pedimento", "tipo", "estado"],
     show="headings",
     height=20,
     yscrollcommand=scroll_y.set,
@@ -521,6 +571,7 @@ tabla = ttk.Treeview(
 )
 
 # Configurar columnas
+tabla.heading("n", text ="N°")
 tabla.heading("material", text="Número Material")
 tabla.heading("factura", text="Número Factura")
 tabla.heading("umc", text="Cantidad UMC")
