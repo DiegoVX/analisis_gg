@@ -641,7 +641,6 @@ def buscar_coincidencias_avanzadas():
                             font=('Arial', 10, 'bold'))
     lbl_contador.pack(pady=(10, 0))
 
-
 def reinyectar_coincidencias(resultados):
     """Función mejorada para reinyectar coincidencias"""
     global materiales_siadal, materiales_encontrados_avanzados
@@ -677,6 +676,170 @@ def reinyectar_coincidencias(resultados):
 
     messagebox.showinfo("Éxito", resumen)
 
+# INICIO MATERIALES CON/SIN ESPACIOS
+def procesar_patrones(patrones, cursor, numero_factura, cantidad_umc, numero_material):
+    resultados_totales = []
+    duplicados_verificados = set()
+
+    # Primera pasada: búsqueda normal
+    for patron in set(patrones):  # Usamos set() para eliminar patrones duplicados
+        query = """
+        SELECT FECHA, ProvNombre, FactEntPedimento, Factura, Folio, Caja_CTR, 
+               NúmeroMaterial, Descripción, Cantidad
+        FROM siadalgoglobaluser.tblMaterial
+        WHERE FECHA >= ? 
+        AND (NúmeroMaterial = ? OR Factura = ? OR FactEntPedimento = ?)
+        AND Factura = ?
+        AND Cantidad = ?
+        """
+
+        cursor.execute(query, ('20240101', patron, patron, patron, numero_factura, cantidad_umc))
+        filas = cursor.fetchall()
+
+        for f in filas:
+            clave_duplicado = (f.NúmeroMaterial, f.Factura)
+            if clave_duplicado not in duplicados_verificados:
+                resultados_totales.append([
+                    f.FECHA, f.ProvNombre, f.FactEntPedimento, f.Factura,
+                    f.Folio, f.Caja_CTR, f.NúmeroMaterial, f.Descripción, f.Cantidad,
+                    numero_material, cantidad_umc, "Existente (SQL)"
+                ])
+                duplicados_verificados.add(clave_duplicado)
+
+    # Segunda pasada: validación de materiales con espacios
+    resultados_totales = validar_materiales_con_espacios(resultados_totales, cursor)
+
+    return resultados_totales
+
+def validar_materiales_con_espacios(resultados_totales, cursor):
+    query_sin_espacios = """
+    SELECT FECHA, ProvNombre, FactEntPedimento, Factura, Folio, Caja_CTR, 
+           NúmeroMaterial, Descripción, Cantidad
+    FROM siadalgoglobaluser.tblMaterial
+    WHERE REPLACE(NúmeroMaterial, ' ', '') = ?
+    AND FECHA >= ?
+    """
+
+    marcados = []
+    materiales_procesados = set()
+
+    for registro in resultados_totales:
+        material_excel = registro[9]  # Posición del material de Excel
+        if not material_excel:  # Si no hay material de Excel, usar el de SIADAL
+            material_excel = registro[6]
+
+        material_sin_espacios = material_excel.replace(" ", "")
+
+        # Si el material tiene espacios y no lo hemos procesado aún
+        if (" " in material_excel and material_excel != material_sin_espacios
+                and material_sin_espacios not in materiales_procesados):
+
+            cursor.execute(query_sin_espacios, (material_sin_espacios, '20240101'))
+            filas = cursor.fetchall()
+
+            for f in filas:
+                registro_marcado = [
+                    f.FECHA, f.ProvNombre, f.FactEntPedimento, f.Factura,
+                    f.Folio, f.Caja_CTR, f.NúmeroMaterial, f.Descripción, f.Cantidad,
+                    material_excel,  # Material original con espacios
+                    registro[10],  # Cantidad UMC
+                    "VALIDADO (Espacios)"  # Estado en rojo
+                ]
+                marcados.append(registro_marcado)
+
+            materiales_procesados.add(material_sin_espacios)
+
+    # Añadir los nuevos registros marcados
+    resultados_totales.extend(marcados)
+    return resultados_totales
+
+# INICIO COINCIDENCIAS COMPLETAS
+def buscar_coincidencias_completas(patrones, cursor, numero_factura, cantidad_umc, numero_material_excel):
+    resultados_totales = []
+    materiales_procesados = set()
+
+    # Normalizamos el material de Excel (eliminamos espacios para comparación)
+    material_normalizado = numero_material_excel.replace(" ", "") if numero_material_excel else ""
+
+    # Consulta SQL optimizada para buscar por diferentes campos
+    query = """
+    SELECT FECHA, ProvNombre, FactEntPedimento, Factura, Folio, Caja_CTR, 
+           NúmeroMaterial, Descripción, Cantidad,
+           REPLACE(NúmeroMaterial, ' ', '') AS MaterialSinEspacios
+    FROM siadalgoglobaluser.tblMaterial
+    WHERE FECHA >= '20240101'
+    AND (NúmeroMaterial = ? OR Factura = ? OR FactEntPedimento = ? 
+         OR REPLACE(NúmeroMaterial, ' ', '') = ?)
+    AND Factura = ?
+    AND Cantidad = ?
+    """
+
+    for patron in set(patrones):
+        # Buscamos tanto el patrón original como su versión sin espacios
+        patron_sin_espacios = patron.replace(" ", "")
+
+        cursor.execute(query, (
+            patron, patron, patron, patron_sin_espacios,
+            numero_factura, cantidad_umc
+        ))
+
+        filas = cursor.fetchall()
+
+        for f in filas:
+            # Creamos una clave única para evitar duplicados
+            clave_unica = (f.Factura, f.MaterialSinEspacios, f.Cantidad)
+
+            if clave_unica not in materiales_procesados:
+                # Determinamos el estado según el tipo de coincidencia
+                if f.MaterialSinEspacios == material_normalizado:
+                    estado = "COINCIDENCIA EXACTA"
+                elif patron_sin_espacios == f.MaterialSinEspacios:
+                    estado = "COINCIDENCIA POR PATRÓN"
+                else:
+                    estado = "COINCIDENCIA POR OTRO CAMPO"
+
+                resultados_totales.append([
+                    f.FECHA, f.ProvNombre, f.FactEntPedimento, f.Factura,
+                    f.Folio, f.Caja_CTR, f.NúmeroMaterial, f.Descripción, f.Cantidad,
+                    numero_material_excel,  # Conservamos el material original con espacios
+                    cantidad_umc,
+                    estado
+                ])
+
+                materiales_procesados.add(clave_unica)
+
+    # Validación adicional para materiales con espacios no encontrados en la primera pasada
+    if " " in numero_material_excel and material_normalizado not in materiales_procesados:
+        query_espacios = """
+        SELECT FECHA, ProvNombre, FactEntPedimento, Factura, Folio, Caja_CTR, 
+               NúmeroMaterial, Descripción, Cantidad
+        FROM siadalgoglobaluser.tblMaterial
+        WHERE REPLACE(NúmeroMaterial, ' ', '') = ?
+        AND FECHA >= '20240101'
+        AND Factura = ?
+        AND Cantidad = ?
+        """
+
+        cursor.execute(query_espacios, (material_normalizado, numero_factura, cantidad_umc))
+        filas_espacios = cursor.fetchall()
+
+        for f in filas_espacios:
+            clave_unica = (f.Factura, material_normalizado, f.Cantidad)
+
+            if clave_unica not in materiales_procesados:
+                resultados_totales.append([
+                    f.FECHA, f.ProvNombre, f.FactEntPedimento, f.Factura,
+                    f.Folio, f.Caja_CTR, f.NúmeroMaterial, f.Descripción, f.Cantidad,
+                    numero_material_excel,
+                    cantidad_umc,
+                    "COINCIDENCIA IGNORANDO ESPACIOS"
+                ])
+
+                materiales_procesados.add(clave_unica)
+
+    return resultados_totales
+
+# INICIO EXPORTAR RESULTADOS
 def exportar_resultados(resultados, df_originales):
     # Crear DataFrame para exportar
     datos_exportar = []
@@ -728,7 +891,7 @@ def actualizar_vista_principal():
 
         tabla.tag_configure("encontrado", background="lightgreen")
 
-# INICIO INTERFAZ GRAFICA
+# INICIO INTERFAZ GRÁFICA
 # Crear ventana principal
 ventana = tk.Tk()
 ventana.title("Analizador de Datos")
