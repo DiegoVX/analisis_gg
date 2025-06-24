@@ -2,15 +2,10 @@ import pandas as pd
 import tkinter as tk
 import matplotlib.pyplot as plt
 import time
-
-from fontTools.cffLib import encodeNumber
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from tkinter import filedialog, ttk, messagebox
 
-# ---------------------------------------------
 # INICIO CODIGO PRINCIPAL
-# ---------------------------------------------
-
 # Variable global para almacenar el DataFrame original procesado
 df_original = None
 materiales_siadal = set()
@@ -23,7 +18,6 @@ def cargar_excel():
     archivo = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx *.xls")])
     if not archivo:
         return
-
     try:
         progress['value'] = 10
         ventana.update()
@@ -64,8 +58,6 @@ def cargar_excel():
         })
 
         df = merged_df[["Número Material", "Número Factura", "Cantidad UMC", "NumeroPedimento", "TipoOperacion"]]
-        # df = df.dropna(subset=["Número Material"])
-        # df = df.drop_duplicates(subset=["Número Material"])
 
         df_original = df
         aplicar_filtro()
@@ -130,87 +122,117 @@ def guardar_datos():
         df_guardar.to_excel(archivo, index=False)
         messagebox.showinfo("Guardado", "Datos guardados correctamente.")
 
-# ---------------------------------------------
-# FIN CODIGO PRINCIPAL
-# ---------------------------------------------
-
-# ---------------------------------------------
 # INICIO GRAFICOS - ESTADISTICAS
-# ---------------------------------------------
+def mostrar_estadisticas():
+    if df_original is None:
+        return
 
-def mostrar_estadisticas(materiales_excel, materiales_sql):
     ventana_estadisticas = tk.Toplevel()
     ventana_estadisticas.title("Estadísticas de Materiales")
     ventana_estadisticas.geometry("500x500")
 
-    # Cálculos
-    total = len(materiales_excel)
-    encontrados = sum(1 for m in materiales_excel if m in materiales_sql)
-    no_encontrados = total - encontrados
+    # Obtener el filtro actual
+    tipo = filtro_operacion.get()
 
-    porcentaje_encontrados = round((encontrados / total) * 100, 2)
-    porcentaje_no_encontrados = round((no_encontrados / total) * 100, 2)
+    # Filtrar datos según selección
+    if tipo == "Todos":
+        df_filtrado = df_original
+    else:
+        df_filtrado = df_original[df_original["TipoOperacion"] == tipo]
+
+    # Calcular estadísticas sobre TODOS los materiales (incluyendo duplicados)
+    total_registros = len(df_filtrado)
+    materiales_excel = df_filtrado["Número Material"].astype(str).str.strip()
+    encontrados = sum(1 for m in materiales_excel if m in materiales_siadal)
+    no_encontrados = total_registros - encontrados
+
+    porcentaje_encontrados = round((encontrados / total_registros) * 100, 2) if total_registros > 0 else 0
+    porcentaje_no_encontrados = round((no_encontrados / total_registros) * 100, 2) if total_registros > 0 else 0
 
     # Tabla de resultados
     frame_tabla = tk.Frame(ventana_estadisticas)
     frame_tabla.pack(pady=10)
 
-    tabla_resultados = ttk.Treeview(frame_tabla, columns=["Estado", "Cantidad", "Porcentaje"], show="headings", height=3)
+    tabla_resultados = ttk.Treeview(frame_tabla, columns=["Estado", "Cantidad", "Porcentaje"], show="headings",
+                                    height=3)
     tabla_resultados.heading("Estado", text="Estado")
     tabla_resultados.heading("Cantidad", text="Cantidad")
     tabla_resultados.heading("Porcentaje", text="Porcentaje")
 
-    tabla_resultados.insert("", "end", values=(" Existentes", encontrados, f"{porcentaje_encontrados}%"))
+    tabla_resultados.insert("", "end", values=("Existentes", encontrados, f"{porcentaje_encontrados}%"))
     tabla_resultados.insert("", "end", values=("No encontrados", no_encontrados, f"{porcentaje_no_encontrados}%"))
-    tabla_resultados.insert("", "end", values=("Total", total, "100%"))
+    tabla_resultados.insert("", "end", values=("Total registros", total_registros, "100%"))
     tabla_resultados.pack()
 
     # Gráfico circular
     fig, ax = plt.subplots(figsize=(4, 4))
-    ax.pie([encontrados, no_encontrados],
-           labels=["Existentes", "No encontrados"],
-           colors=["lightgreen", "salmon"],
-           autopct='%1.1f%%',
-           startangle=90)
-    ax.axis('equal')
+    if total_registros > 0:
+        ax.pie([encontrados, no_encontrados],
+               labels=["Existentes", "No encontrados"],
+               colors=["lightgreen", "salmon"],
+               autopct='%1.1f%%',
+               startangle=90)
+        ax.axis('equal')
+    else:
+        ax.text(0.5, 0.5, "No hay datos para mostrar", ha='center', va='center')
 
     canvas = FigureCanvasTkAgg(fig, master=ventana_estadisticas)
     canvas.draw()
     canvas.get_tk_widget().pack(pady=30)
 
-# --------------------------------------------
-# FIN GRAFICOS - ESTADISTICAS
-# --------------------------------------------
-
-# --------------------------------------------
 # INICIO COMPARACION
-# --------------------------------------------
+def mostrar_comparacion_excel_siadal():
+    if df_original is None:
+        return
 
-def mostrar_comparacion_excel_siadal(materiales_excel, materiales_sql):
     ventana_comparacion = tk.Toplevel()
-    ventana_comparacion.title("Comparación Materiales Excel vs SIADAL")
-    ventana_comparacion.geometry("600x500")
+    ventana_comparacion.title("Comparación Completa Excel vs SIADAL")
+    ventana_comparacion.geometry("900x650")  # Ventana más grande para más columnas
 
-    # Unión con coincidencias avanzadas
-    materiales_existentes_totales = materiales_sql.union(materiales_encontrados_avanzados)
+    # Obtener el filtro actual
+    tipo = filtro_operacion.get()
+
+    # Filtrar datos según selección
+    if tipo == "Todos":
+        df_filtrado = df_original.copy()
+        titulo = f"Comparación Completa (Todos los {len(df_filtrado)} registros)"
+    else:
+        df_filtrado = df_original[df_original["TipoOperacion"] == tipo].copy()
+        titulo = f"Comparación ({len(df_filtrado)} registros de {tipo})"
+
+    ventana_comparacion.title(titulo)
 
     frame_comparacion = tk.Frame(ventana_comparacion)
-    frame_comparacion.pack(fill="both", expand=True, padx=20, pady=20)
+    frame_comparacion.pack(fill="both", expand=True, padx=10, pady=10)
 
     scroll_y = tk.Scrollbar(frame_comparacion, orient="vertical")
     scroll_x = tk.Scrollbar(frame_comparacion, orient="horizontal")
 
+    # Columnas adicionales para mostrar toda la información
     tabla_comp = ttk.Treeview(
         frame_comparacion,
-        columns=["n", "excel", "siadal"],
+        columns=["n", "material", "factura", "cantidad", "pedimento", "siadal", "tipo", "estado"],
         show="headings",
         yscrollcommand=scroll_y.set,
-        xscrollcommand=scroll_x.set
+        xscrollcommand=scroll_x.set,
+        height=25
     )
 
-    tabla_comp.heading("n", text="N°")
-    tabla_comp.heading("excel", text="Número Material (Excel)")
-    tabla_comp.heading("siadal", text="Número Material (SIADAL")
+    # Configurar columnas
+    columnas = [
+        ("n", "N°", 50),
+        ("material", "Material (Excel)", 150),
+        ("factura", "N° Factura", 100),
+        ("cantidad", "Cantidad", 80),
+        ("pedimento", "Pedimento", 100),
+        ("siadal", "Material (SIADAL)", 150),
+        ("tipo", "Tipo Operación", 100),
+        ("estado", "Estado", 120)
+    ]
+
+    for col, text, width in columnas:
+        tabla_comp.heading(col, text=text)
+        tabla_comp.column(col, width=width, anchor="w")
 
     scroll_y.config(command=tabla_comp.yview)
     scroll_x.config(command=tabla_comp.xview)
@@ -218,44 +240,80 @@ def mostrar_comparacion_excel_siadal(materiales_excel, materiales_sql):
     scroll_x.pack(side="bottom", fill="x")
     tabla_comp.pack(fill="both", expand=True)
 
-    tabla_comp.tag_configure("sin_coincidencia", background="salmon")
-    tabla_comp.tag_configure("sql_match", background="lightgreen")
-    tabla_comp.tag_configure("avanzado_match", background="lightblue")
+    # Configurar estilos
+    tabla_comp.tag_configure("sin_coincidencia", background="#FFCCCB")  # Rojo claro
+    tabla_comp.tag_configure("sql_match", background="#90EE90")  # Verde claro
+    tabla_comp.tag_configure("avanzado_match", background="#ADD8E6")  # Azul claro
 
-    materiales_unicos = sorted(set(materiales_excel))
+    # Procesar TODOS los registros del DataFrame filtrado (no solo únicos)
+    for idx, (_, row) in enumerate(df_filtrado.iterrows(), start=1):
+        material_excel = str(row["Número Material"]).strip() if pd.notna(row["Número Material"]) else ""
+        factura = str(row["Número Factura"])
+        cantidad = str(row["Cantidad UMC"])
+        pedimento = str(row["NumeroPedimento"])
+        tipo_op = row["TipoOperacion"]
 
-    for idx, mat in enumerate(materiales_unicos, start=1):
-        if mat in materiales_siadal:
-            siadal_match = mat
+        # Determinar coincidencia
+        if material_excel in materiales_siadal:
+            material_siadal = material_excel
+            estado = "Existente (SQL)"
             tag = "sql_match"
-        elif mat in materiales_encontrados_avanzados:
-            siadal_match = mat
+        elif material_excel in materiales_encontrados_avanzados:
+            material_siadal = material_excel
+            estado = "Existente (Avanzado)"
             tag = "avanzado_match"
         else:
-            siadal_match = ""
+            material_siadal = ""
+            estado = "No encontrado"
             tag = "sin_coincidencia"
 
-        tabla_comp.insert("", "end", values=(idx, mat, siadal_match), tags=(tag,))
+        tabla_comp.insert("", "end", values=(
+            idx,
+            material_excel,
+            factura,
+            cantidad,
+            pedimento,
+            material_siadal,
+            tipo_op,
+            estado
+        ), tags=(tag,))
 
-# --------------------------------------------
-# FIN COMPARACION
-# --------------------------------------------
+    # Añadir contador de registros
+    frame_contador = tk.Frame(ventana_comparacion)
+    frame_contador.pack(pady=5)
+    tk.Label(frame_contador, text=f"Total de registros mostrados: {len(df_filtrado)}",
+             font=('Arial', 10, 'bold')).pack()
 
-# ---------------------------------------------
+    # Botón para exportar a Excel
+    btn_exportar = tk.Button(ventana_comparacion, text="Exportar a Excel",
+                             command=lambda: exportar_comparacion(df_filtrado))
+    btn_exportar.pack(pady=5)
+
+
+def exportar_comparacion(df):
+    archivo = filedialog.asksaveasfilename(
+        defaultextension=".xlsx",
+        filetypes=[("Excel files", "*.xlsx")],
+        title="Guardar comparación como"
+    )
+    if archivo:
+        try:
+            df.to_excel(archivo, index=False)
+            messagebox.showinfo("Éxito", "Comparación exportada correctamente")
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo exportar: {str(e)}")
+
 # INICIO CONSULTA SQL SERVER Y MUESTRA RESULTADOS
-# ---------------------------------------------
-
 def consultar_y_colorear():
     import pyodbc
-
     if df_original is None:
         messagebox.showwarning("Advertencia", "Primero debes cargar un archivo Excel.")
         return
-
     try:
         progress['value'] = 10
         ventana.update()
 
+        # Conexión SQL (mantener igual)
         server = 'PRACTICAS_TI\\MSSQLSERVER1'
         database = 'dbSiadalGoGlobal'
         username = 'sa'
@@ -275,31 +333,32 @@ def consultar_y_colorear():
         progress['value'] = 40
         ventana.update()
 
+        # Limpiar tabla
         for row in tabla.get_children():
             tabla.delete(row)
 
-        global materiales_vistos
-        btn_estadisticas = tk.Button(frame_botones, text="Ver Estadísticas", width=25,
-                                     command=lambda: mostrar_estadisticas(materiales_vistos, materiales_siadal))
-        btn_estadisticas.pack(side="left", padx=5)
-
-        materiales_vistos = set()
+        # MODIFICACIÓN CLAVE: Mostrar TODOS los registros (4,722) incluyendo duplicados
         total = len(df_original)
         procesados = 0
 
-        idx = 1
+        # Obtener el tipo de operación seleccionado
+        tipo_operacion = filtro_operacion.get()
 
-        for _, row in df_original.iterrows():
+        # Filtrar según el combobox
+        if tipo_operacion == "Todos":
+            df_a_mostrar = df_original.copy()
+        else:
+            df_a_mostrar = df_original[df_original["TipoOperacion"] == tipo_operacion]
+
+        # Mostrar todos los registros del filtro aplicado
+        for idx, row in df_a_mostrar.iterrows():
             numero_material = str(row["Número Material"]).strip() if pd.notna(row["Número Material"]) else ""
-            if numero_material in materiales_vistos:
-                continue
-            materiales_vistos.add(numero_material)
 
             tag_color = "verde" if numero_material in materiales_sql else "rojo"
             estado = "Existente" if tag_color == "verde" else "No existente"
 
             tabla.insert("", "end", values=(
-                idx,
+                idx + 1,  # Número consecutivo
                 numero_material,
                 row["Número Factura"],
                 row["Cantidad UMC"],
@@ -308,22 +367,25 @@ def consultar_y_colorear():
                 estado
             ), tags=(tag_color,))
 
-            idx += 1
             procesados += 1
             progreso_actual = 40 + int((procesados / total) * 60)
             progress['value'] = progreso_actual
             ventana.update()
 
+        # Configurar colores
         tabla.tag_configure("verde", background="lightgreen")
         tabla.tag_configure("rojo", background="salmon")
 
         cursor.close()
         conexion.close()
 
-        mostrar_estadisticas(materiales_vistos, materiales_sql)
+        # Actualizar materiales_vistos con TODOS los materiales únicos (sin duplicados)
+        global materiales_vistos
+        materiales_vistos = set(str(x).strip() for x in df_original["Número Material"].dropna().unique())
 
-        # Mostrar tabla comparativa
-        mostrar_comparacion_excel_siadal(materiales_vistos, materiales_sql)
+        # Mostrar estadísticas con los materiales únicos
+        mostrar_estadisticas(materiales_vistos, materiales_siadal)
+        mostrar_comparacion_excel_siadal(materiales_vistos, materiales_siadal)
 
         progress['value'] = 100
         ventana.update()
@@ -334,14 +396,7 @@ def consultar_y_colorear():
         progress['value'] = 0
         messagebox.showerror("Error SQL", f"No se pudo ejecutar la consulta:\n{e}")
 
-# ---------------------------------------------
-# FIN CONSULTA SQL SERVER Y MUESTRA RESULTADOS
-# ---------------------------------------------
-
-# --------------------------------------------
 # INICIO BUSQUEDA AVANZADA
-# --------------------------------------------
-
 def buscar_coincidencias_avanzadas():
     import pyodbc
 
@@ -353,6 +408,7 @@ def buscar_coincidencias_avanzadas():
         progress['value'] = 10
         ventana.update()
 
+        # Configuración de conexión
         server = 'PRACTICAS_TI\\MSSQLSERVER1'
         database = 'dbSiadalGoGlobal'
         username = 'sa'
@@ -363,10 +419,23 @@ def buscar_coincidencias_avanzadas():
         )
         cursor = conexion.cursor()
 
-        df_no_encontrados = df_original[~df_original["Número Material"].astype(str).isin(materiales_siadal)]
+        # Obtener el filtro actual
+        tipo = filtro_operacion.get()
+
+        # Filtrar según el combobox pero mantener todos los registros para evaluación
+        if tipo == "Todos":
+            df_a_evaluar = df_original.copy()
+        else:
+            df_a_evaluar = df_original[df_original["TipoOperacion"] == tipo].copy()
+
+        # Identificar materiales no encontrados (considerando todos los registros)
+        df_no_encontrados = df_a_evaluar[
+            ~df_a_evaluar["Número Material"].astype(str).str.strip().isin(materiales_siadal)
+        ]
 
         if df_no_encontrados.empty:
-            messagebox.showinfo("Información", "No hay materiales no encontrados en SIADAL para buscar coincidencias avanzadas.")
+            messagebox.showinfo("Información",
+                                "No hay materiales no encontrados en SIADAL para buscar coincidencias avanzadas.")
             progress['value'] = 0
             return
 
@@ -374,49 +443,72 @@ def buscar_coincidencias_avanzadas():
         total = len(df_no_encontrados)
         procesados = 0
 
+        # Buscar coincidencias avanzadas para cada registro no encontrado
         for _, fila in df_no_encontrados.iterrows():
-            numero_material = str(fila["Número Material"]).strip()  if pd.notna(fila["Número Material"]) else ""
+            numero_material = str(fila["Número Material"]).strip() if pd.notna(fila["Número Material"]) else ""
             numero_factura = str(fila["Número Factura"]).strip()
-            cantidad_umc = int(fila["Cantidad UMC"])
+            cantidad_umc = float(fila["Cantidad UMC"])  # Convertir a float para evitar errores
 
-            query = f"""
-                SELECT 
-                    c.FactEntFechaEnt AS FECHA, 
-                    p.ProvNombre, 
-                    c.FactEntPedimento, 
-                    c.FactEntNofact AS Factura, 
-                    c.FactEntFolio AS Folio, 
-                    c.FactEntContenedor AS Caja_CTR, 
-                    a.MatNoParte AS NúmeroMaterial, 
-                    a.MatDescr AS Descripción, 
-                    SUM(b.MovExistente) AS Cantidad
-                FROM siadalgoglobaluser.tblMaterial AS a
-                INNER JOIN siadalgoglobaluser.tblMovimientos AS b ON a.idMaterial = b.idMaterial
-                INNER JOIN siadalgoglobaluser.tblFacturaEnt AS c ON b.idFactEnt = c.idFactEnt
-                INNER JOIN siadalgoglobaluser.tblDescrFactEnt AS d 
-                    ON a.idMaterial = d.idMaterial 
-                    AND c.idFactEnt = d.idFactEnt 
-                    AND b.iddescrFERenTras = d.idDescrFactEnt
-                INNER JOIN siadalgoglobaluser.tblProveedor AS p ON c.idProveedor = p.idProveedor
-                WHERE (c.idAlmacen = 17) 
-                  AND (c.FactEntFechaEnt >= 20240101)
-                  AND a.MatNoParte LIKE ?
-                  AND c.FactEntNofact = ?
-                GROUP BY 
-                    c.FactEntFechaEnt, p.ProvNombre, c.FactEntPedimento, c.FactEntNofact, 
-                    c.FactEntFolio, c.FactEntContenedor, a.MatDescr, a.MatNoParte
-                HAVING SUM(b.MovExistente) = ?
-                ORDER BY FECHA DESC
+            # Consulta SQL optimizada para obtener TODAS las coincidencias posibles
+            query = """
+            SELECT 
+                c.FactEntFechaEnt AS FECHA, 
+                p.ProvNombre, 
+                c.FactEntPedimento, 
+                c.FactEntNofact AS Factura, 
+                c.FactEntFolio AS Folio, 
+                c.FactEntContenedor AS Caja_CTR, 
+                a.MatNoParte AS NúmeroMaterial, 
+                a.MatDescr AS Descripción, 
+                b.MovExistente AS Cantidad
+            FROM siadalgoglobaluser.tblMaterial AS a
+            INNER JOIN siadalgoglobaluser.tblMovimientos AS b ON a.idMaterial = b.idMaterial
+            INNER JOIN siadalgoglobaluser.tblFacturaEnt AS c ON b.idFactEnt = c.idFactEnt
+            INNER JOIN siadalgoglobaluser.tblDescrFactEnt AS d 
+                ON a.idMaterial = d.idMaterial 
+                AND c.idFactEnt = d.idFactEnt 
+                AND b.iddescrFERenTras = d.idDescrFactEnt
+            INNER JOIN siadalgoglobaluser.tblProveedor AS p ON c.idProveedor = p.idProveedor
+            WHERE c.idAlmacen = 17 
+              AND c.FactEntFechaEnt >= ?
+              AND (
+                  a.MatNoParte LIKE ? OR  -- Coincidencia parcial
+                  a.MatNoParte LIKE ? OR  -- Coincidencia al final
+                  a.MatNoParte LIKE ?     -- Coincidencia al inicio
+              )
+              AND c.FactEntNofact = ?
+              AND b.MovExistente = ?
+            ORDER BY FECHA DESC
             """
 
-            cursor.execute(query, (f"%{numero_material}%", numero_factura, cantidad_umc))
-            filas = cursor.fetchall()
+            # Buscar coincidencias de diferentes formas
+            patrones = [
+                f"%{numero_material}%",  # Cualquier coincidencia parcial
+                f"%{numero_material}",  # Coincidencia al final
+                f"{numero_material}%"  # Coincidencia al inicio
+            ]
 
-            for f in filas:
-                resultados_totales.append([
-                    f.FECHA, f.ProvNombre, f.FactEntPedimento, f.Factura,
-                    f.Folio, f.Caja_CTR, f.NúmeroMaterial, f.Descripción, f.Cantidad
-                ])
+            # Versión optimizada
+            patrones_unicos = set(patrones)  # Eliminar patrones duplicados si es posible
+
+            # Estructura para verificación rápida de duplicados
+            duplicados_verificados = set()
+
+            for patron in patrones_unicos:
+                cursor.execute(query, ('20240101', patron, patron, patron, numero_factura, cantidad_umc))
+                filas = cursor.fetchall()
+
+                for f in filas:
+                    # Crear una clave única para verificar duplicados
+                    clave_duplicado = (f.NúmeroMaterial, f.Factura)
+
+                    if clave_duplicado not in duplicados_verificados:
+                        resultados_totales.append([
+                            f.FECHA, f.ProvNombre, f.FactEntPedimento, f.Factura,
+                            f.Folio, f.Caja_CTR, f.NúmeroMaterial, f.Descripción, f.Cantidad,
+                            numero_material, cantidad_umc
+                        ])
+                        duplicados_verificados.add(clave_duplicado)
 
             procesados += 1
             progreso_actual = 10 + int((procesados / total) * 90)
@@ -431,106 +523,212 @@ def buscar_coincidencias_avanzadas():
         time.sleep(0.3)
         progress['value'] = 0
 
-        ventana_resultados = tk.Toplevel()
-        ventana_resultados.title("Coincidencias Avanzadas en SIADAL")
-        ventana_resultados.geometry("1100x500")
-
-        frame_tabla = tk.Frame(ventana_resultados)
-        frame_tabla.pack(fill="both", expand=True, padx=10, pady=10)
-
-        scroll_y = tk.Scrollbar(frame_tabla, orient="vertical")
-        scroll_x = tk.Scrollbar(frame_tabla, orient="horizontal")
-
-        tabla_coincidencias = ttk.Treeview(
-            frame_tabla,
-            columns=["n", "Fecha", "Proveedor", "Pedimento", "Factura", "Folio", "Caja_CTR", "NúmeroMaterial", "Descripción", "Cantidad"],
-            show="headings",
-            yscrollcommand=scroll_y.set,
-            xscrollcommand=scroll_x.set,
-            height=20
-        )
-
-        tabla_coincidencias.heading("n", text = "N°")
-
-        for col in tabla_coincidencias["columns"]:
-            tabla_coincidencias.heading(col, text=col)
-            tabla_coincidencias.column(col, width=120, anchor="w")
-
-        scroll_y.config(command=tabla_coincidencias.yview)
-        scroll_x.config(command=tabla_coincidencias.xview)
-        scroll_y.pack(side="right", fill="y")
-        scroll_x.pack(side="bottom", fill="x")
-        tabla_coincidencias.pack(fill="both", expand=True)
-
-        for idx, fila in enumerate(resultados_totales, start=1):
-            tabla_coincidencias.insert("", "end", values=[idx] + fila)
-
-        # Guardar coincidencias avanzadas encontradas
-        global materiales_encontrados_avanzados
-        materiales_encontrados_avanzados = set()
-
-        if resultados_totales:
-            materiales_encontrados_avanzados = set(
-                f[6] for f in resultados_totales if f[6] in df_original["Número Material"].astype(str).values
-            )
-
-            df_exportar = pd.DataFrame(resultados_totales, columns=[
-                "Fecha", "Proveedor", "Pedimento", "Factura", "Folio", "Caja_CTR",
-                "NúmeroMaterial", "Descripción", "Cantidad"
-            ])
-
-            archivo_guardado = filedialog.asksaveasfilename(
-                title="Guardar Coincidencias Avanzadas",
-                defaultextension=".xlsx",
-                filetypes=[("Excel files", "*.xlsx")]
-            )
-
-        if archivo_guardado:
-            try:
-                df_exportar.to_excel(archivo_guardado, index=False)
-                messagebox.showinfo("Archivo Guardado",
-                                    f"Coincidencias avanzadas guardadas en:\n{archivo_guardado}")
-            except Exception as e:
-                messagebox.showerror("Error al guardar", f"No se pudo guardar el archivo:\n{e}")
-        else:
-            messagebox.showinfo("Sin Resultados",
-                            "No se encontraron coincidencias avanzadas para los materiales no existentes.")
-
-        # Después de guardar resultados
-        if resultados_totales:
-            materiales_encontrados_avanzados = set(f[6] for f in resultados_totales)
-
-            # ESTA PARTE ACTUALIZA LA TABLA PRINCIPAL Y LA COMPARACIÓN
-            materiales_vistos_actualizados = materiales_vistos.union(materiales_encontrados_avanzados)
-            mostrar_comparacion_excel_siadal(materiales_vistos_actualizados, materiales_siadal)
-
-            # También inserta los nuevos encontrados en la tabla principal
-            for _, row in df_original.iterrows():
-                numero_material = str(fila["Número Material"]).strip()  if pd.notna(row["Número Material"]) else ""
-                if numero_material in materiales_encontrados_avanzados and numero_material not in materiales_vistos:
-                    tabla.insert("", "end", values=(
-                        numero_material,
-                        row["Número Factura"],
-                        row["Cantidad UMC"],
-                        row["NumeroPedimento"],
-                        row["TipoOperacion"],
-                        "Coincidencia Avanzada"
-                    ), tags=("amarillo",))
-                    materiales_vistos.add(numero_material)
-
-            tabla.tag_configure("amarillo", background="khaki")
-
     except Exception as e:
         progress['value'] = 0
-        messagebox.showerror("Error búsqueda avanzada", f"Error al buscar coincidencias avanzadas:\n{e}")
-# --------------------------------------------
-# FIN BUSQUEDA AVANZADA
-# --------------------------------------------
+        messagebox.showerror("Error", f"Error en búsqueda avanzada:\n{str(e)}")
 
-# ---------------------------------------------
+    # Mostrar resultados
+    ventana_resultados = tk.Toplevel()
+    ventana_resultados.title(f"Coincidencias Avanzadas en SIADAL ({len(resultados_totales)} resultados)")
+    ventana_resultados.geometry("1400x700")
+
+    # Frame principal
+    frame_principal = tk.Frame(ventana_resultados, padx=20, pady=20)
+    frame_principal.pack(fill="both", expand=True)
+
+    # Frame para controles
+    frame_controles = tk.Frame(frame_principal)
+    frame_controles.pack(fill="x", pady=(0, 15))
+
+    # Botones con estilo mejorado
+    btn_exportar = tk.Button(frame_controles, text="Exportar a Excel", width=20,
+                             command=lambda: exportar_resultados(resultados_totales, df_a_evaluar),
+                             bg="#4CAF50", fg="white")
+    btn_exportar.pack(side="left", padx=5)
+
+    btn_reinyectar = tk.Button(frame_controles, text="Reinyectar Coincidencias", width=20,
+                               command=lambda: reinyectar_coincidencias(resultados_totales),
+                               bg="#2196F3", fg="white")
+    btn_reinyectar.pack(side="left", padx=5)
+
+    btn_cerrar = tk.Button(frame_controles, text="Cerrar", width=20,
+                           command=ventana_resultados.destroy,
+                           bg="#f44336", fg="white")
+    btn_cerrar.pack(side="left", padx=5)
+
+    # Frame para la tabla
+    frame_tabla = tk.LabelFrame(frame_principal, text="Resultados de Coincidencias", padx=10, pady=10)
+    frame_tabla.pack(fill="both", expand=True)
+
+    # Scrollbars
+    scroll_y = tk.Scrollbar(frame_tabla, orient="vertical")
+    scroll_x = tk.Scrollbar(frame_tabla, orient="horizontal")
+
+    # Configuración de columnas mejorada
+    columnas = [
+        ("n", "N°", 50, "center"),
+        ("Fecha", "Fecha", 120, "center"),
+        ("Proveedor", "Proveedor", 180, "w"),
+        ("Pedimento", "Pedimento", 120, "center"),
+        ("Factura", "Factura", 120, "center"),
+        ("Folio", "Folio", 80, "center"),
+        ("Caja_CTR", "Caja/CTR", 100, "center"),
+        ("Material_SIADAL", "Material SIADAL", 180, "w"),
+        ("Descripcion", "Descripción", 250, "w"),
+        ("Cantidad_SIADAL", "Cantidad SIADAL", 100, "center"),
+        ("Material_Excel", "Material Excel", 180, "w"),
+        ("Cantidad_Excel", "Cantidad Excel", 100, "center"),
+        ("Tipo_Operacion", "Tipo Operación", 120, "center")
+    ]
+
+    # Estilo para la tabla
+    style = ttk.Style()
+    style.configure("Treeview", font=('Arial', 10), rowheight=25)
+    style.configure("Treeview.Heading", font=('Arial', 10, 'bold'))
+
+    tabla_coincidencias = ttk.Treeview(
+        frame_tabla,
+        columns=[col[0] for col in columnas],
+        show="headings",
+        yscrollcommand=scroll_y.set,
+        xscrollcommand=scroll_x.set,
+        height=20
+    )
+
+    # Configurar columnas
+    for col, text, width, anchor in columnas:
+        tabla_coincidencias.heading(col, text=text)
+        tabla_coincidencias.column(col, width=width, anchor=anchor)
+
+    scroll_y.config(command=tabla_coincidencias.yview)
+    scroll_x.config(command=tabla_coincidencias.xview)
+    scroll_y.pack(side="right", fill="y")
+    scroll_x.pack(side="bottom", fill="x")
+    tabla_coincidencias.pack(fill="both", expand=True)
+
+    # Insertar datos con colores alternados
+    for idx, fila in enumerate(resultados_totales, start=1):
+        tipo_op = df_a_evaluar[
+            (df_a_evaluar["Número Factura"] == fila[3]) &
+            (df_a_evaluar["Número Material"].astype(str).str.strip() == fila[9])
+            ]["TipoOperacion"].values[0]
+
+        tags = ('evenrow',) if idx % 2 == 0 else ('oddrow',)
+
+        tabla_coincidencias.insert("", "end", values=[
+            idx,
+            fila[0],  # Fecha
+            fila[1],  # Proveedor
+            fila[2],  # Pedimento
+            fila[3],  # Factura
+            fila[4],  # Folio
+            fila[5],  # Caja_CTR
+            fila[6],  # Material_SIADAL
+            fila[7],  # Descripción
+            f"{fila[8]:.2f}",  # Cantidad SIADAL
+            fila[9],  # Material Excel
+            f"{fila[10]:.2f}",  # Cantidad Excel
+            tipo_op  # Tipo Operación
+        ], tags=tags)
+
+    # Configurar colores alternados
+    tabla_coincidencias.tag_configure('oddrow', background='white')
+    tabla_coincidencias.tag_configure('evenrow', background='#f5f5f5')
+
+    # Contador de resultados
+    lbl_contador = tk.Label(frame_principal,
+                            text=f"Total de coincidencias encontradas: {len(resultados_totales)}",
+                            font=('Arial', 10, 'bold'))
+    lbl_contador.pack(pady=(10, 0))
+
+
+def reinyectar_coincidencias(resultados):
+    """Función mejorada para reinyectar coincidencias"""
+    global materiales_siadal, materiales_encontrados_avanzados
+
+    # Extraer materiales únicos encontrados
+    nuevos_materiales = {str(fila[6]).strip() for fila in resultados if str(fila[6]).strip()}
+
+    if not nuevos_materiales:
+        messagebox.showwarning("Advertencia", "No hay coincidencias para reinyectar")
+        return
+
+    # Agregar a los conjuntos globales
+    materiales_siadal.update(nuevos_materiales)
+    materiales_encontrados_avanzados.update(nuevos_materiales)
+
+    # Actualizar vista principal
+    aplicar_filtro()
+
+    # Resaltar coincidencias en la tabla principal
+    for row in tabla.get_children():
+        valores = tabla.item(row)['values']
+        if len(valores) > 1 and valores[1] in nuevos_materiales:
+            tabla.item(row, tags=("encontrado",))
+
+    tabla.tag_configure("encontrado", background="lightgreen")
+
+    # Mostrar resumen
+    resumen = (
+        f"Se reinyectaron {len(nuevos_materiales)} materiales:\n"
+        f"- Coincidencias exactas: {len([m for m in nuevos_materiales if m in df_original['Número Material'].astype(str).str.strip().values])}\n"
+        f"- Coincidencias parciales: {len(nuevos_materiales) - len([m for m in nuevos_materiales if m in df_original['Número Material'].astype(str).str.strip().values])}"
+    )
+
+    messagebox.showinfo("Éxito", resumen)
+
+def exportar_resultados(resultados, df_originales):
+    # Crear DataFrame para exportar
+    datos_exportar = []
+
+    for res in resultados:
+        datos_exportar.append({
+            "Fecha": res[0],
+            "Proveedor": res[1],
+            "Pedimento": res[2],
+            "Factura": res[3],
+            "Folio": res[4],
+            "Caja_CTR": res[5],
+            "Material_SIADAL": res[6],
+            "Descripcion": res[7],
+            "Cantidad_SIADAL": res[8],
+            "Material_Excel": res[9],
+            "Cantidad_Excel": res[10],
+            "Tipo_Operacion": df_originales[
+                (df_originales["Número Factura"] == res[3]) &
+                (df_originales["Número Material"].astype(str).str.strip() == res[9])
+                ]["TipoOperacion"].values[0]
+        })
+
+    df_export = pd.DataFrame(datos_exportar)
+
+    archivo = filedialog.asksaveasfilename(
+        defaultextension=".xlsx",
+        filetypes=[("Excel files", "*.xlsx")],
+        title="Guardar coincidencias avanzadas"
+    )
+
+    if archivo:
+        try:
+            df_export.to_excel(archivo, index=False)
+            messagebox.showinfo("Éxito", "Datos exportados correctamente")
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo exportar: {str(e)}")
+
+def actualizar_vista_principal():
+    # Actualizar la tabla principal con los nuevos materiales encontrados
+    if df_original is not None:
+        aplicar_filtro()  # Esto refrescará la vista
+
+        # Resaltar los nuevos materiales encontrados
+        for row in tabla.get_children():
+            valores = tabla.item(row)['values']
+            if len(valores) > 1 and valores[1] in materiales_encontrados_avanzados:
+                tabla.item(row, tags=("encontrado",))
+
+        tabla.tag_configure("encontrado", background="lightgreen")
+
 # INICIO INTERFAZ GRAFICA
-# ---------------------------------------------
-
 # Crear ventana principal
 ventana = tk.Tk()
 ventana.title("Analizador de Datos")
@@ -588,10 +786,6 @@ scroll_y.pack(side="right", fill="y")
 scroll_x.pack(side="bottom", fill="x")
 tabla.pack(fill="both", expand=True)
 
-# -------------------------------------------------
-# FIN INTERFAZ GRAFICA
-# -------------------------------------------------
-
 # Barra de progreso
 # Barra de progreso
 progress = ttk.Progressbar(ventana, orient="horizontal", length=400, mode="determinate")
@@ -610,10 +804,12 @@ btn_verificar_sql.pack(side="left", padx=5)
 btn_buscar_avanzadas = tk.Button(frame_botones, text="Buscar Coincidencias Avanzadas", width=25, command=buscar_coincidencias_avanzadas)
 btn_buscar_avanzadas.pack(side="left", padx=5)
 
-btn_comparar = tk.Button(frame_botones, text="Comparar Excel vs SIADAL", width=25, command=lambda: mostrar_comparacion_excel_siadal(
-    [str(x).strip() for x in df_original["Número Material"].dropna().unique()],
-    materiales_siadal
-))
+btn_estadisticas = tk.Button(frame_botones, text="Ver Estadísticas", width=25,
+                            command=mostrar_estadisticas)
+btn_estadisticas.pack(side="left", padx=5)
+
+btn_comparar = tk.Button(frame_botones, text="Comparar Excel vs SIADAL", width=25,
+                        command=mostrar_comparacion_excel_siadal)
 btn_comparar.pack(side="left", padx=5)
 
 # Inicia el bucle principal de la aplicación
