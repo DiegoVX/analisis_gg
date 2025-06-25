@@ -13,6 +13,8 @@ class DataController:
     def cargar_excel(self):
         """Carga un archivo Excel y actualiza la vista."""
         archivo = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx *.xls")])
+        self.ruta_excel = archivo
+
         if not archivo:
             return
 
@@ -148,3 +150,32 @@ class DataController:
         df_filtrado = self.model.filtrar_datos(tipo_operacion)
         if df_filtrado is not None:
             self.view.mostrar_comparacion_excel_siadal(df_filtrado, tipo_operacion)
+
+    def actualizar_excel_con_siadal(self):
+        tipo_operacion = self.view.filtro_operacion.get()
+        self.view.update_progress(5)
+
+        ok, msg, resultados = self.model.buscar_coincidencias_avanzadas(tipo_operacion)
+        if not ok:
+            self.view.show_error("Error", msg)
+            return
+
+        self.view.update_progress(40)
+        ruta_nueva = filedialog.asksaveasfilename(
+            defaultextension=".xlsx",
+            filetypes=[("Archivos Excel", "*.xlsx")],
+            title="Guardar archivo actualizado con SIADAL"
+        )
+        if not ruta_nueva.endswith('.xlsx'):
+            ruta_nueva += 'xlsx'
+            return
+
+        self.view.update_progress(70)
+        exito, mensaje = self.model.escribir_resultados_en_excel(self.ruta_excel, ruta_nueva, resultados)
+
+        if exito:
+            self.view.show_message("Éxito", mensaje)
+        else:
+            self.view.show_error("Error", mensaje)
+
+        self.view.update_progress(100)
