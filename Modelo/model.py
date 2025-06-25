@@ -11,36 +11,78 @@ class DataModel:
         self.materiales_encontrados_avanzados = set()
         self.materiales_vistos = set()
 
-    def cargar_excel(self, archivo):
-        if not archivo:
-            return False, "No se seleccionó ningún archivo."
+    def cargar_varios_excel(self, archivos):
+        """Carga múltiples archivos Excel, buscando las hojas que contengan los datos necesarios sin depender de nombres fijos."""
+        if not archivos:
+            return False, "No se seleccionaron archivos."
 
-        try:
-            detalle_df = pd.read_excel(archivo, sheet_name="DETALLE FAC", engine="openpyxl")
-            relacion_df = pd.read_excel(archivo, sheet_name="RELACIÓN FAC-PED", engine="openpyxl", header=None)
-            relacion_df.columns = relacion_df.iloc[0]
-            relacion_df = relacion_df[1:][["NumeroFactura", "NumeroPedimento"]].drop_duplicates(subset=["NumeroFactura"])
+        lista_dfs = []
 
-            encabezado_df = pd.read_excel(archivo, sheet_name="ENCABEZADO FAC", engine="openpyxl", header=None)
-            encabezado_df.columns = ["NumeroFactura", "?", "TipoOperacion"] + list(encabezado_df.columns[3:])
-            encabezado_df = encabezado_df[1:][["NumeroFactura", "TipoOperacion"]].drop_duplicates(subset=["NumeroFactura"])
+        for archivo in archivos:
+            try:
+                xl = pd.ExcelFile(archivo, engine="openpyxl")
+                hojas = xl.sheet_names
 
-            detalle_df["Número Factura"] = detalle_df["Número Factura"].astype(str)
-            relacion_df["NumeroFactura"] = relacion_df["NumeroFactura"].astype(str)
-            encabezado_df["NumeroFactura"] = encabezado_df["NumeroFactura"].astype(str)
+                detalle_df = None
+                relacion_df = None
+                encabezado_df = None
 
-            merged_df = detalle_df.merge(relacion_df, left_on="Número Factura", right_on="NumeroFactura", how="left")
-            merged_df = merged_df.merge(encabezado_df, left_on="Número Factura", right_on="NumeroFactura", how="left")
-            merged_df["TipoOperacion"] = merged_df["TipoOperacion"].map({1: "Importación", 2: "Exportación"})
+                for hoja in hojas:
+                    df = xl.parse(hoja, header=None)
 
-            self.df_original = merged_df[
-                ["Número Material", "Número Factura", "Cantidad UMC", "NumeroPedimento", "TipoOperacion"]
-            ]
+                    # Detectar "RELACIÓN FAC-PED"
+                    if relacion_df is None and "NumeroFactura" in df.iloc[0].values and "NumeroPedimento" in df.iloc[
+                        0].values:
+                        df.columns = df.iloc[0]
+                        relacion_df = df[1:][["NumeroFactura", "NumeroPedimento"]].drop_duplicates(
+                            subset=["NumeroFactura"])
 
-            # No se aplica ningún coloreo aquí
-            return True, "Archivo cargado correctamente."
-        except Exception as e:
-            return False, f"No se pudo procesar el archivo: {e}"
+                    # Detectar "ENCABEZADO FAC"
+                    elif encabezado_df is None and ("NumeroFactura" in df.iloc[0].values or df.shape[1] >= 3):
+                        df.columns = ["NumeroFactura", "?", "TipoOperacion"] + list(
+                            df.iloc[0][3:])  # Ajustar según tus datos reales
+                        encabezado_df = df[1:][["NumeroFactura", "TipoOperacion"]].drop_duplicates(
+                            subset=["NumeroFactura"])
+
+                    # Detectar "DETALLE FAC" (buscamos columnas clave conocidas)
+                    elif detalle_df is None:
+                        df_temp = xl.parse(hoja)
+                        columnas_esperadas = {"Número Material", "Número Factura", "Cantidad UMC"}
+                        if columnas_esperadas.issubset(set(df_temp.columns)):
+                            detalle_df = df_temp
+
+                # Si no se encontró alguna tabla crítica, se omite
+                if detalle_df is None or relacion_df is None or encabezado_df is None:
+                    print(f"[Advertencia] Archivo omitido por falta de datos suficientes: {archivo}")
+                    continue
+
+                # Asegurar tipos
+                detalle_df["Número Factura"] = detalle_df["Número Factura"].astype(str)
+                relacion_df["NumeroFactura"] = relacion_df["NumeroFactura"].astype(str)
+                encabezado_df["NumeroFactura"] = encabezado_df["NumeroFactura"].astype(str)
+
+                # Unir todo
+                merged_df = detalle_df.merge(relacion_df, left_on="Número Factura", right_on="NumeroFactura",
+                                             how="left")
+                merged_df = merged_df.merge(encabezado_df, left_on="Número Factura", right_on="NumeroFactura",
+                                            how="left")
+                merged_df["TipoOperacion"] = merged_df["TipoOperacion"].map({1: "Importación", 2: "Exportación"})
+
+                final_df = merged_df[[
+                    "Número Material", "Número Factura", "Cantidad UMC", "NumeroPedimento", "TipoOperacion"
+                ]]
+
+                lista_dfs.append(final_df)
+
+            except Exception as e:
+                print(f"[Error] No se pudo procesar el archivo {archivo}: {e}")
+                continue
+
+        if not lista_dfs:
+            return False, "Ningún archivo válido fue cargado."
+
+        self.df_original = pd.concat(lista_dfs, ignore_index=True)
+        return True, f"{len(lista_dfs)} archivo(s) cargado(s) correctamente."
 
     def filtrar_datos(self, tipo_operacion):
         if self.df_original is None:

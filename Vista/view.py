@@ -23,7 +23,7 @@ class DataView:
     def setup_ui(self):
         """Configura la interfaz gráfica principal."""
         # Botón para cargar Excel
-        btn_cargar = tk.Button(self.root, text="Cargar Excel", command=lambda: self.controller.cargar_excel())
+        btn_cargar = tk.Button(self.root, text="Cargar Excel", command=lambda: self.controller.cargar_varios_excel())
         btn_cargar.pack(pady=10)
 
         # Filtro de tipo de operación
@@ -164,26 +164,28 @@ class DataView:
         canvas.draw()
         canvas.get_tk_widget().pack(pady=30)
 
-    def mostrar_comparacion_excel_siadal(self, df_filtrado, tipo_operacion):
-        """Muestra la comparación entre Excel y SIADAL en una ventana emergente."""
+    def mostrar_comparacion_excel_siadal(self):
+        """Muestra solo los registros no encontrados en la comparación Excel vs SIADAL."""
+        if self.controller.model.df_original is None:
+            messagebox.showwarning("Advertencia", "No hay datos cargados.")
+            return
+
+        df_filtrado = self.controller.model.df_original.copy()
+
+        # Filtrar solo los materiales NO encontrados en ninguna de las listas
+        df_no_encontrados = df_filtrado[
+            ~df_filtrado["Número Material"].isin(self.controller.model.materiales_siadal) &
+            ~df_filtrado["Número Material"].isin(self.controller.model.materiales_encontrados_avanzados)
+            ]
+
         ventana_comparacion = tk.Toplevel(self.root)
-        titulo = f"Comparación ({len(df_filtrado)} registros de {tipo_operacion})" if tipo_operacion != "Todos" else f"Comparación Completa (Todos los {len(df_filtrado)} registros)"
-        ventana_comparacion.title(titulo)
+        ventana_comparacion.title(f"Comparación - No encontrados ({len(df_no_encontrados)} registros)")
         ventana_comparacion.geometry("900x650")
 
         frame_comparacion = tk.Frame(ventana_comparacion)
         frame_comparacion.pack(fill="both", expand=True, padx=10, pady=10)
         scroll_y = tk.Scrollbar(frame_comparacion, orient="vertical")
         scroll_x = tk.Scrollbar(frame_comparacion, orient="horizontal")
-
-        tabla_comp = ttk.Treeview(
-            frame_comparacion,
-            columns=["n", "material", "factura", "cantidad", "pedimento", "siadal", "tipo", "estado"],
-            show="headings",
-            yscrollcommand=scroll_y.set,
-            xscrollcommand=scroll_x.set,
-            height=25
-        )
 
         columnas = [
             ("n", "N°", 50),
@@ -192,9 +194,17 @@ class DataView:
             ("cantidad", "Cantidad", 80),
             ("pedimento", "Pedimento", 100),
             ("siadal", "Material (SIADAL)", 150),
-            ("tipo", "Tipo Operación", 100),
-            ("estado", "Estado", 120)
+            ("tipo", "Tipo Operación", 100)
         ]
+
+        tabla_comp = ttk.Treeview(
+            frame_comparacion,
+            columns=[col[0] for col in columnas],
+            show="headings",
+            yscrollcommand=scroll_y.set,
+            xscrollcommand=scroll_x.set,
+            height=25
+        )
 
         for col, text, width in columnas:
             tabla_comp.heading(col, text=text)
@@ -206,31 +216,24 @@ class DataView:
         scroll_x.pack(side="bottom", fill="x")
         tabla_comp.pack(fill="both", expand=True)
 
-        for idx, row in df_filtrado.iterrows():
+        for idx, row in df_no_encontrados.iterrows():
             material_excel = str(row["Número Material"]).strip() if pd.notna(row["Número Material"]) else ""
             factura = str(row["Número Factura"])
             cantidad = str(row["Cantidad UMC"])
             pedimento = str(row["NumeroPedimento"]) if pd.notna(row["NumeroPedimento"]) else ""
             tipo_op = row["TipoOperacion"]
-            material_siadal, estado, tag = (
-                (material_excel, "Existente (SQL)", "sql_match")
-                if material_excel in self.controller.model.materiales_siadal
-                else (material_excel, "Existente (Avanzado)", "avanzado_match")
-                if material_excel in self.controller.model.materiales_encontrados_avanzados
-                else ("", "No encontrado", "sin_coincidencia")
-            )
 
             tabla_comp.insert("", "end", values=(
-                idx + 1, material_excel, factura, cantidad, pedimento, material_siadal, tipo_op, estado
-            ), tags=(tag,))
+                idx + 1, material_excel, factura, cantidad, pedimento, "", tipo_op
+            ))
 
         frame_contador = tk.Frame(ventana_comparacion)
         frame_contador.pack(pady=5)
-        tk.Label(frame_contador, text=f"Total de registros mostrados: {len(df_filtrado)}",
+        tk.Label(frame_contador, text=f"Total de registros mostrados: {len(df_no_encontrados)}",
                  font=('Arial', 10, 'bold')).pack()
 
         btn_exportar = tk.Button(ventana_comparacion, text="Exportar a Excel",
-                                 command=lambda: self.controller.exportar_comparacion(df_filtrado))
+                                 command=lambda: self.controller.exportar_comparacion(df_no_encontrados))
         btn_exportar.pack(pady=5)
 
     def mostrar_coincidencias_avanzadas(self, resultados, df_original):

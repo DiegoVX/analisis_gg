@@ -10,16 +10,16 @@ class DataController:
         self.view = view
         self.view.set_controller(self)
 
-    def cargar_excel(self):
-        """Carga un archivo Excel y actualiza la vista."""
-        archivo = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx *.xls")])
-        self.ruta_excel = archivo
+    def cargar_varios_excel(self):
+        """Carga uno o varios archivos Excel y actualiza la vista."""
+        archivos = filedialog.askopenfilenames(filetypes=[("Excel files", "*.xlsx *.xls")])
+        self.ruta_excel = archivos
 
-        if not archivo:
+        if not archivos:
             return
 
         self.view.update_progress(10)
-        success, message = self.model.cargar_excel(archivo)
+        success, message = self.model.cargar_varios_excel(archivos)
         self.view.update_progress(30)
 
         if success:
@@ -149,7 +149,7 @@ class DataController:
         tipo_operacion = self.view.filtro_operacion.get()
         df_filtrado = self.model.filtrar_datos(tipo_operacion)
         if df_filtrado is not None:
-            self.view.mostrar_comparacion_excel_siadal(df_filtrado, tipo_operacion)
+            self.view.mostrar_comparacion_excel_siadal()
 
     def actualizar_excel_con_siadal(self):
         tipo_operacion = self.view.filtro_operacion.get()
