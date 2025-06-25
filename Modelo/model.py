@@ -154,7 +154,7 @@ class DataModel:
                 INNER JOIN siadalgoglobaluser.tblDescrFactEnt AS d ON a.idMaterial = d.idMaterial 
                     AND c.idFactEnt = d.idFactEnt AND b.iddescrFERenTras = d.idDescrFactEnt
                 INNER JOIN siadalgoglobaluser.tblProveedor AS p ON c.idProveedor = p.idProveedor
-                WHERE (c.idAlmacen = 17) AND (c.FactEntFechaEnt >= 20240101)
+                WHERE (c.idAlmacen = 17, 8, 15) AND (c.FactEntFechaEnt >= 20240101)
                     AND a.MatNoParte LIKE '{mat}%'
                     AND c.FactEntNofact = '{factura}'
                 GROUP BY c.FactEntFechaEnt, p.ProvNombre, c.FactEntFechaFactura, c.FactEntPedimento, 
