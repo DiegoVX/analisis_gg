@@ -1,6 +1,6 @@
 import pandas as pd
 import pyodbc
-
+from openpyxl import load_workbook
 
 class DataModel:
     """Modelo para manejar datos de Excel y consultas SQL."""
@@ -168,3 +168,36 @@ class DataModel:
         self.materiales_siadal.update(nuevos)
         self.materiales_encontrados_avanzados.update(nuevos)
         return True, f"Se reinyectaron {len(nuevos)} materiales."
+
+    def escribir_resultados_en_excel(self, ruta_entrada, ruta_salida, resultados_avanzados):
+        try:
+            wb = load_workbook(ruta_entrada)
+            hoja = wb["DETALLE FAC"]
+
+            # Encontrar la columna de "Número Material"
+            encabezados = [cell.value for cell in hoja[1]]
+            if "Número Material" not in encabezados:
+                return False, "No se encontró la columna 'Número Material' en el archivo."
+
+            col_material = encabezados.index("Número Material") + 1
+            nueva_col = col_material + 1
+
+            # Escribir encabezado de la nueva columna
+            hoja.cell(row=1, column=nueva_col, value="Número Material SIADAL")
+
+            # Crear diccionario con las coincidencias (clave = material y factura)
+            coincidencias_dict = {(str(r[9]).strip(), r[3]): str(r[6]).strip() for r in resultados_avanzados}
+
+            for fila in range(2, hoja.max_row + 1):
+                num_mat = hoja.cell(row=fila, column=col_material).value
+                factura = hoja.cell(row=fila, column=encabezados.index("Número Factura") + 1).value
+
+                if num_mat and factura:
+                    clave = (str(num_mat).strip(), factura)
+                    valor_siadal = coincidencias_dict.get(clave, "")
+                    hoja.cell(row=fila, column=nueva_col, value=valor_siadal)
+
+            wb.save(ruta_salida)
+            return True, "Archivo actualizado correctamente."
+        except Exception as e:
+            return False, f"Error al escribir en Excel: {e}"

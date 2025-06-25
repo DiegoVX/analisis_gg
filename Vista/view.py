@@ -3,6 +3,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from tkinter import filedialog, messagebox, Button
 
 
 class DataView:
@@ -259,6 +260,11 @@ class DataView:
                                bg="#f44336", fg="white")
         btn_cerrar.pack(side="left", padx=5)
 
+        """btn_actualizar_excel = tk.Button(frame_botones, text="Actualizar Excel con SIADAL",
+                                         width=25, bg="#6A5ACD", fg="white",
+                                         command=lambda: self.controller.actualizar_excel_con_siadal())
+        btn_actualizar_excel.pack(side="left", padx=5, fill="x", expand=True)"""
+
         frame_tabla = tk.LabelFrame(frame_principal, text="Resultados de Coincidencias", padx=10, pady=10)
         frame_tabla.pack(fill="both", expand=True)
 
@@ -341,3 +347,29 @@ class DataView:
     def set_controller(self, controller):
         """Establece el controlador para la vista."""
         self.controller = controller
+
+    """def generar_excel_actualizado():
+        tipo_operacion = combo_tipo_operacion.get()
+    
+        ok, msg, resultados = modelo.buscar_coincidencias_avanzadas(tipo_operacion)
+        if not ok:
+            messagebox.showerror("Error", msg)
+            return
+    
+        nueva_ruta = filedialog.asksaveasfilename(
+            defaultextension=".xlsx",
+            filetypes=[("Archivos Excel", "*.xlsx")],
+            title="Guardar archivo actualizado"
+        )
+        if not nueva_ruta:
+            return
+    
+        exito, mensaje = modelo.escribir_resultados_en_excel(ruta_archivo_excel, nueva_ruta, resultados)
+        if exito:
+            messagebox.showinfo("Éxito", mensaje)
+        else:
+            messagebox.showerror("Error", mensaje)
+    
+    # Agrega el botón donde lo necesites en la ventana
+    btn_actualizar_excel = Button(ventana, text="Actualizar Excel con SIADAL", command=generar_excel_actualizado)
+    btn_actualizar_excel.pack(pady=10)"""
