@@ -1,6 +1,7 @@
 import pandas as pd
 import pyodbc
 from openpyxl import load_workbook
+from openpyxl.styles import PatternFill
 
 class DataModel:
     """Modelo para manejar datos de Excel y consultas SQL."""
@@ -11,78 +12,36 @@ class DataModel:
         self.materiales_encontrados_avanzados = set()
         self.materiales_vistos = set()
 
-    def cargar_varios_excel(self, archivos):
-        """Carga múltiples archivos Excel, buscando las hojas que contengan los datos necesarios sin depender de nombres fijos."""
-        if not archivos:
-            return False, "No se seleccionaron archivos."
+    def cargar_excel(self, archivo):
+        if not archivo:
+            return False, "No se seleccionó ningún archivo."
 
-        lista_dfs = []
+        try:
+            detalle_df = pd.read_excel(archivo, sheet_name="DETALLE FAC", engine="openpyxl")
+            relacion_df = pd.read_excel(archivo, sheet_name="RELACIÓN FAC-PED", engine="openpyxl", header=None)
+            relacion_df.columns = relacion_df.iloc[0]
+            relacion_df = relacion_df[1:][["NumeroFactura", "NumeroPedimento"]].drop_duplicates(
+                subset=["NumeroFactura"])
 
-        for archivo in archivos:
-            try:
-                xl = pd.ExcelFile(archivo, engine="openpyxl")
-                hojas = xl.sheet_names
+            encabezado_df = pd.read_excel(archivo, sheet_name="ENCABEZADO FAC", engine="openpyxl", header=None)
+            encabezado_df.columns = ["NumeroFactura", "?", "TipoOperacion"] + list(encabezado_df.columns[3:])
+            encabezado_df = encabezado_df[1:][["NumeroFactura", "TipoOperacion"]].drop_duplicates(
+                subset=["NumeroFactura"])
 
-                detalle_df = None
-                relacion_df = None
-                encabezado_df = None
+            detalle_df["Número Factura"] = detalle_df["Número Factura"].astype(str)
+            relacion_df["NumeroFactura"] = relacion_df["NumeroFactura"].astype(str)
+            encabezado_df["NumeroFactura"] = encabezado_df["NumeroFactura"].astype(str)
 
-                for hoja in hojas:
-                    df = xl.parse(hoja, header=None)
+            merged_df = detalle_df.merge(relacion_df, left_on="Número Factura", right_on="NumeroFactura", how="left")
+            merged_df = merged_df.merge(encabezado_df, left_on="Número Factura", right_on="NumeroFactura", how="left")
+            merged_df["TipoOperacion"] = merged_df["TipoOperacion"].map({1: "Importación", 2: "Exportación"})
 
-                    # Detectar "RELACIÓN FAC-PED"
-                    if relacion_df is None and "NumeroFactura" in df.iloc[0].values and "NumeroPedimento" in df.iloc[
-                        0].values:
-                        df.columns = df.iloc[0]
-                        relacion_df = df[1:][["NumeroFactura", "NumeroPedimento"]].drop_duplicates(
-                            subset=["NumeroFactura"])
+            self.df_original = merged_df[
+                ["Número Material", "Número Factura", "Cantidad UMC", "NumeroPedimento", "TipoOperacion"]]
 
-                    # Detectar "ENCABEZADO FAC"
-                    elif encabezado_df is None and ("NumeroFactura" in df.iloc[0].values or df.shape[1] >= 3):
-                        df.columns = ["NumeroFactura", "?", "TipoOperacion"] + list(
-                            df.iloc[0][3:])  # Ajustar según tus datos reales
-                        encabezado_df = df[1:][["NumeroFactura", "TipoOperacion"]].drop_duplicates(
-                            subset=["NumeroFactura"])
-
-                    # Detectar "DETALLE FAC" (buscamos columnas clave conocidas)
-                    elif detalle_df is None:
-                        df_temp = xl.parse(hoja)
-                        columnas_esperadas = {"Número Material", "Número Factura", "Cantidad UMC"}
-                        if columnas_esperadas.issubset(set(df_temp.columns)):
-                            detalle_df = df_temp
-
-                # Si no se encontró alguna tabla crítica, se omite
-                if detalle_df is None or relacion_df is None or encabezado_df is None:
-                    print(f"[Advertencia] Archivo omitido por falta de datos suficientes: {archivo}")
-                    continue
-
-                # Asegurar tipos
-                detalle_df["Número Factura"] = detalle_df["Número Factura"].astype(str)
-                relacion_df["NumeroFactura"] = relacion_df["NumeroFactura"].astype(str)
-                encabezado_df["NumeroFactura"] = encabezado_df["NumeroFactura"].astype(str)
-
-                # Unir todo
-                merged_df = detalle_df.merge(relacion_df, left_on="Número Factura", right_on="NumeroFactura",
-                                             how="left")
-                merged_df = merged_df.merge(encabezado_df, left_on="Número Factura", right_on="NumeroFactura",
-                                            how="left")
-                merged_df["TipoOperacion"] = merged_df["TipoOperacion"].map({1: "Importación", 2: "Exportación"})
-
-                final_df = merged_df[[
-                    "Número Material", "Número Factura", "Cantidad UMC", "NumeroPedimento", "TipoOperacion"
-                ]]
-
-                lista_dfs.append(final_df)
-
-            except Exception as e:
-                print(f"[Error] No se pudo procesar el archivo {archivo}: {e}")
-                continue
-
-        if not lista_dfs:
-            return False, "Ningún archivo válido fue cargado."
-
-        self.df_original = pd.concat(lista_dfs, ignore_index=True)
-        return True, f"{len(lista_dfs)} archivo(s) cargado(s) correctamente."
+            return True, "Archivo cargado correctamente."
+        except Exception as e:
+            return False, f"No se pudo procesar el archivo: {e}"
 
     def filtrar_datos(self, tipo_operacion):
         if self.df_original is None:
@@ -117,6 +76,7 @@ class DataModel:
             return False, "Datos no cargados o consulta SQL no realizada.", []
 
         df_filtrado = self.filtrar_datos(tipo_operacion)
+
         df_no_encontrados = df_filtrado[
             ~df_filtrado["Número Material"].astype(str).str.strip().isin(self.materiales_siadal)
         ]
@@ -132,49 +92,61 @@ class DataModel:
                 'UID=sa;PWD=root'
             )
             cursor = conexion.cursor()
+
             resultados_totales = []
             duplicados_verificados = set()
 
             for fila in df_no_encontrados.itertuples():
-                mat = str(fila._1).strip()
-                factura = fila._2
+                mat = str(fila._1).strip().upper().replace("'", "''")
+                factura = str(fila._2).strip().replace("'", "''")
                 try:
-                    cantidad = float(fila._3)
+                    cantidad_excel = float(fila._3)
                 except (ValueError, TypeError):
                     continue
 
+                # NUEVO: tolerancia en comparación de cantidades (±5%)
+                tolerancia = 0.05
+
                 query = f"""
-                SELECT 
+                SELECT
                     c.FactEntFechaEnt AS FECHA, p.ProvNombre, c.FactEntPedimento, c.FactEntNofact, 
                     c.FactEntFolio, c.FactEntContenedor AS Caja_CTR, a.MatNoParte, a.MatDescr, 
-                    SUM(b.MovExistente) as qty
+                    SUM(b.MovExistente) AS qty
                 FROM siadalgoglobaluser.tblMaterial AS a
                 INNER JOIN siadalgoglobaluser.tblMovimientos AS b ON a.idMaterial = b.idMaterial
                 INNER JOIN siadalgoglobaluser.tblFacturaEnt AS c ON b.idFactEnt = c.idFactEnt
                 INNER JOIN siadalgoglobaluser.tblDescrFactEnt AS d ON a.idMaterial = d.idMaterial 
                     AND c.idFactEnt = d.idFactEnt AND b.iddescrFERenTras = d.idDescrFactEnt
                 INNER JOIN siadalgoglobaluser.tblProveedor AS p ON c.idProveedor = p.idProveedor
-                WHERE (c.idAlmacen = 17, 8, 15) AND (c.FactEntFechaEnt >= 20240101)
-                    AND a.MatNoParte LIKE '{mat}%'
-                    AND c.FactEntNofact = '{factura}'
-                GROUP BY c.FactEntFechaEnt, p.ProvNombre, c.FactEntFechaFactura, c.FactEntPedimento, 
+                WHERE c.idAlmacen IN (17, 8, 15)
+                  AND c.FactEntFechaEnt >= 20240101
+                  AND c.FactEntNofact = '{factura}'
+                  AND a.MatNoParte LIKE '{mat}%'
+                GROUP BY
+                    c.FactEntFechaEnt, p.ProvNombre, c.FactEntFechaFactura, c.FactEntPedimento, 
                     c.FactEntNofact, c.FactEntFolio, c.FactEntContenedor, a.MatDescr, a.MatNoParte
                 ORDER BY FECHA DESC
                 """
 
                 cursor.execute(query)
                 for r in cursor.fetchall():
-                    clave = (r.MatNoParte, r.FactEntNofact)
-                    if clave not in duplicados_verificados:
-                        resultados_totales.append([
-                            r.FECHA, r.ProvNombre, r.FactEntPedimento, r.FactEntNofact,
-                            r.FactEntFolio, r.Caja_CTR, r.MatNoParte, r.MatDescr, float(r.qty),
-                            mat, cantidad
-                        ])
-                        duplicados_verificados.add(clave)
-                        self.materiales_encontrados_avanzados.add(mat)
+                    mat_encontrado = str(r.MatNoParte).strip().upper()
+                    clave = (mat_encontrado, r.FactEntNofact)
+
+                    # Validación por cantidad con tolerancia del 5%
+                    cantidad_siadal = float(r.qty)
+                    if abs(cantidad_siadal - cantidad_excel) / max(cantidad_excel, 1) <= tolerancia:
+                        if clave not in duplicados_verificados:
+                            resultados_totales.append([
+                                r.FECHA, r.ProvNombre, r.FactEntPedimento, r.FactEntNofact,
+                                r.FactEntFolio, r.Caja_CTR, mat_encontrado, r.MatDescr, cantidad_siadal,
+                                mat, cantidad_excel
+                            ])
+                            duplicados_verificados.add(clave)
+                            self.materiales_encontrados_avanzados.add(mat)
 
             return True, "Búsqueda avanzada completada.", resultados_totales
+
         except Exception as e:
             return False, f"Error: {e}", []
 
@@ -216,30 +188,41 @@ class DataModel:
             wb = load_workbook(ruta_entrada)
             hoja = wb["DETALLE FAC"]
 
-            # Encontrar la columna de "Número Material"
+            # Buscar columnas necesarias
             encabezados = [cell.value for cell in hoja[1]]
-            if "Número Material" not in encabezados:
-                return False, "No se encontró la columna 'Número Material' en el archivo."
+            if "Número Material" not in encabezados or "Número Factura" not in encabezados:
+                return False, "No se encontró alguna de las columnas necesarias en el archivo."
 
             col_material = encabezados.index("Número Material") + 1
+            col_factura = encabezados.index("Número Factura") + 1
             nueva_col = col_material + 1
 
-            # Escribir encabezado de la nueva columna
+            # Escribir encabezado para columna nueva
             hoja.cell(row=1, column=nueva_col, value="Número Material SIADAL")
 
-            # Crear diccionario con las coincidencias (clave = material y factura)
-            coincidencias_dict = {(str(r[9]).strip(), r[3]): str(r[6]).strip() for r in resultados_avanzados}
+            # Construir diccionario clave=(material, factura)
+            coincidencias_dict = {
+                (str(r[9]).strip(), str(r[3]).strip()): str(r[6]).strip()
+                for r in resultados_avanzados
+            }
 
+            # Limpieza del fondo verde si se encuentra coincidencia
             for fila in range(2, hoja.max_row + 1):
                 num_mat = hoja.cell(row=fila, column=col_material).value
-                factura = hoja.cell(row=fila, column=encabezados.index("Número Factura") + 1).value
+                factura = hoja.cell(row=fila, column=col_factura).value
 
                 if num_mat and factura:
-                    clave = (str(num_mat).strip(), factura)
+                    clave = (str(num_mat).strip(), str(factura).strip())
                     valor_siadal = coincidencias_dict.get(clave, "")
+
                     hoja.cell(row=fila, column=nueva_col, value=valor_siadal)
+
+                    # Si se encontró coincidencia, eliminar color verde
+                    if valor_siadal:
+                        hoja.cell(row=fila, column=col_material).fill = PatternFill(fill_type=None)
 
             wb.save(ruta_salida)
             return True, "Archivo actualizado correctamente."
+
         except Exception as e:
             return False, f"Error al escribir en Excel: {e}"

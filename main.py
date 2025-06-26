@@ -11,6 +11,7 @@ def main():
         view = DataView(root)
         controller = DataController(model, view)
         view.set_controller(controller)
+        view.setup_ui()
         root.mainloop()
     except KeyboardInterrupt:
         print("Programa detenido por el usuario.")

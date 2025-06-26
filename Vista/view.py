@@ -13,17 +13,18 @@ class DataView:
         self.root.title("Analizador de Datos")
         self.root.geometry("950x650")
 
+        self.controller = None
+
         self.tabla = None
         self.progress = None
         self.filtro_operacion = None
         self.btn_verificar_sql = None
         self.btn_buscar_avanzadas = None
-        self.setup_ui()
 
     def setup_ui(self):
         """Configura la interfaz gráfica principal."""
         # Botón para cargar Excel
-        btn_cargar = tk.Button(self.root, text="Cargar Excel", command=lambda: self.controller.cargar_varios_excel())
+        btn_cargar = tk.Button(self.root, text="Cargar Excel", command=lambda: self.controller.cargar_excel())
         btn_cargar.pack(pady=10)
 
         # Filtro de tipo de operación
@@ -105,18 +106,30 @@ class DataView:
         self.tabla.tag_configure("oddrow", background="white")
         self.tabla.tag_configure("evenrow", background="#f5f5f5")
 
-    def mostrar_datos(self, datos):
-        """Muestra los datos en la tabla principal."""
+    def mostrar_datos(self, datos, colorear=True):
+        """Muestra los datos en la tabla principal con o sin color según se indique."""
         if not hasattr(self, "controller"):
             return
 
         for row in self.tabla.get_children():
             self.tabla.delete(row)
 
+        materiales_siadal = self.controller.model.materiales_siadal
+        aplicar_estado = bool(materiales_siadal)
+
         for idx, row in datos.iterrows():
             numero_material = str(row["Número Material"]).strip() if pd.notna(row["Número Material"]) else ""
-            estado = "Existente" if numero_material in self.controller.model.materiales_siadal else "No Existe"
-            tag = "verde" if estado == "Existente" else "rojo"
+
+            if aplicar_estado:
+                estado = "Existente" if numero_material in materiales_siadal else "No Existe"
+                tag = ("verde",) if estado == "Existente" else ("rojo",)
+            else:
+                estado = "Pendiente"
+                tag = ()
+
+            if not colorear:
+                tag = ()
+
             self.tabla.insert("", "end", values=(
                 idx + 1,
                 numero_material,
@@ -125,7 +138,7 @@ class DataView:
                 str(row["NumeroPedimento"]) if pd.notna(row["NumeroPedimento"]) else "",
                 row["TipoOperacion"],
                 estado
-            ), tags=(tag,))
+            ), tags=tag)
 
     def mostrar_estadisticas(self, df_filtrado):
         """Muestra estadísticas en una ventana emergente con tabla y gráfico circular."""

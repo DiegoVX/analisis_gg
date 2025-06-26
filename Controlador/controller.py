@@ -10,22 +10,25 @@ class DataController:
         self.view = view
         self.view.set_controller(self)
 
-    def cargar_varios_excel(self):
-        """Carga uno o varios archivos Excel y actualiza la vista."""
-        archivos = filedialog.askopenfilenames(filetypes=[("Excel files", "*.xlsx *.xls")])
-        self.ruta_excel = archivos
+    def cargar_excel(self):
+        """Carga un archivo Excel y actualiza la vista."""
+        archivo = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx *.xls")])
+        self.ruta_excel = archivo
 
-        if not archivos:
+        if not archivo:
             return
 
         self.view.update_progress(10)
-        success, message = self.model.cargar_varios_excel(archivos)
+        success, message = self.model.cargar_excel(archivo)
         self.view.update_progress(30)
 
         if success:
             self.view.btn_verificar_sql.config(state="normal")
             self.view.btn_buscar_avanzadas.config(state="normal")
-            self.aplicar_filtro()
+
+            df_filtrado = self.model.filtrar_datos(self.view.filtro_operacion.get())
+            self.view.mostrar_datos(df_filtrado, colorear=False)
+
             self.view.update_progress(100)
             time.sleep(0.5)
             self.view.update_progress(0)
