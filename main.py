@@ -2,7 +2,7 @@
 import tkinter as tk
 import re
 from tkinter import ttk, messagebox, filedialog
-from excel_loader import cargar_excel
+#from excel_loader import cargar_excel
 from sql_checker import buscar_coincidencia_siadal
 import pandas as pd
 import matplotlib.pyplot as plt
